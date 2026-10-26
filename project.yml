@@ -19,9 +19,4 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.openmatrix.app
         CODE_SIGNING_ALLOWED: NO
     info:
-      properties:
-        CFBundleDisplayName: OpenMatrix
-        NSPhotoLibraryUsageDescription: Choose an image to send to your iDotMatrix display.
-        NSBluetoothAlwaysUsageDescription: OpenMatrix uses Bluetooth to send images to your iDotMatrix display.
-        UIBackgroundModes:
-          - bluetooth-central
+      path: Info.plist
