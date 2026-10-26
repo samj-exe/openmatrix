@@ -88,7 +88,12 @@ struct ContentView: View {
                         statusMessage = "Connected target: \(display.name)."
                     } label: {
                         HStack {
-                            Text(display.name)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(display.name)
+                                Text("\(display.isLikelyIDotMatrix ? "iDotMatrix candidate" : "Nearby BLE device") · \(display.rssi) dBm")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                             Spacer()
                             if bluetooth.selectedDisplayName == display.name {
                                 Image(systemName: "checkmark.circle.fill")

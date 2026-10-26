@@ -5,6 +5,8 @@ import Foundation
 struct MatrixDisplay: Identifiable, Equatable {
     let id: UUID
     let name: String
+    let rssi: Int
+    let isLikelyIDotMatrix: Bool
 }
 
 @MainActor
@@ -47,7 +49,7 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
         central.scanForPeripherals(withServices: nil)
 
         do {
-            try await Task.sleep(for: .seconds(5))
+            try await Task.sleep(for: .seconds(10))
         } catch {
             central.stopScan()
             isScanning = false
@@ -236,11 +238,19 @@ extension IDotMatrixBluetooth: CBCentralManagerDelegate {
         let services = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
         let recognizedByService = services.contains(Self.serviceUUID)
         let normalizedName = name.lowercased()
-        let recognizedByName = normalizedName.hasPrefix("idm") || normalizedName.hasPrefix("ipixel")
-        guard recognizedByService || recognizedByName else { return }
+        let recognizedByName = normalizedName.contains("idotmatrix")
+            || normalizedName.contains("idot")
+            || normalizedName.hasPrefix("idm")
+            || normalizedName.hasPrefix("ipixel")
 
         foundPeripherals[peripheral.identifier] = peripheral
-        let display = MatrixDisplay(id: peripheral.identifier, name: name.isEmpty ? "iDotMatrix display" : name)
+        let shortID = peripheral.identifier.uuidString.prefix(4)
+        let display = MatrixDisplay(
+            id: peripheral.identifier,
+            name: name.isEmpty ? "Unnamed BLE device (\(shortID))" : name,
+            rssi: RSSI.intValue,
+            isLikelyIDotMatrix: recognizedByService || recognizedByName
+        )
         if let index = displays.firstIndex(where: { $0.id == display.id }) {
             displays[index] = display
         } else {
