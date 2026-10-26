@@ -1,0 +1,27 @@
+name: OpenMatrix
+options:
+  bundleIdPrefix: com.openmatrix
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1"
+targets:
+  OpenMatrix:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/OpenMatrix
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.openmatrix.app
+        CODE_SIGNING_ALLOWED: NO
+    info:
+      properties:
+        CFBundleDisplayName: OpenMatrix
+        NSPhotoLibraryUsageDescription: Choose an image to send to your iDotMatrix display.
+        NSBluetoothAlwaysUsageDescription: OpenMatrix uses Bluetooth to send images to your iDotMatrix display.
+        UIBackgroundModes:
+          - bluetooth-central

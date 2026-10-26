@@ -1,0 +1,53 @@
+name: Build unsigned iOS IPA
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.0"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Archive unsigned app
+        run: |
+          xcodebuild \
+            -project OpenMatrix.xcodeproj \
+            -scheme OpenMatrix \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/OpenMatrix.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+
+      - name: Package unsigned IPA
+        run: |
+          package_dir="$(mktemp -d)"
+          trap 'rm -rf "$package_dir"' EXIT
+          mkdir -p "$package_dir/Payload"
+          cp -R build/OpenMatrix.xcarchive/Products/Applications/OpenMatrix.app "$package_dir/Payload/"
+          ditto -c -k --sequesterRsrc --keepParent "$package_dir/Payload" build/OpenMatrix.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenMatrix-unsigned-ipa
+          path: build/OpenMatrix.ipa
+          if-no-files-found: error
+          retention-days: 30
