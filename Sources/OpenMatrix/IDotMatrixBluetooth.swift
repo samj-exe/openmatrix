@@ -17,22 +17,21 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
     @Published private(set) var isScanning = false
     @Published private(set) var isSending = false
     @Published private(set) var selectedDisplayName: String?
+    @Published private(set) var bluetoothStatus = "Tap Scan to request Bluetooth access."
 
     private static let serviceUUID = CBUUID(string: "000000FA-0000-1000-8000-00805F9B34FB")
     private static let writeCharacteristicUUID = CBUUID(string: "0000FA02-0000-1000-8000-00805F9B34FB")
     private let defaults = UserDefaults.standard
-    private var central: CBCentralManager!
+    private var central: CBCentralManager?
     private var foundPeripherals: [UUID: CBPeripheral] = [:]
     private var activePeripheral: CBPeripheral?
     private var writeCharacteristic: CBCharacteristic?
-    private var readinessWaiter: CheckedContinuation<Void, Error>?
     private var connectionWaiter: CheckedContinuation<Void, Error>?
     private var writeReadyWaiter: CheckedContinuation<Void, Error>?
 
     private override init() {
         super.init()
         selectedDisplayName = defaults.string(forKey: "selectedDisplayName")
-        central = CBCentralManager(delegate: self, queue: .main)
     }
 
     func select(_ display: MatrixDisplay) {
@@ -42,21 +41,41 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
     }
 
     func scan() async throws {
-        try await waitUntilReady()
+        guard !isScanning, !isSending else { return }
         isScanning = true
+        bluetoothStatus = "Requesting Bluetooth access…"
+
+        do {
+            try await waitUntilReady()
+        } catch {
+            isScanning = false
+            bluetoothStatus = error.localizedDescription
+            throw error
+        }
+
         displays = []
         foundPeripherals = [:]
-        central.scanForPeripherals(withServices: nil)
+        guard let central, central.state == .poweredOn else {
+            isScanning = false
+            bluetoothStatus = "Bluetooth is not powered on."
+            throw MatrixError.bluetoothUnavailable
+        }
+        central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+        bluetoothStatus = "Scanning for nearby Bluetooth displays…"
 
         do {
             try await Task.sleep(for: .seconds(10))
         } catch {
             central.stopScan()
             isScanning = false
+            bluetoothStatus = "Scan cancelled."
             throw error
         }
         central.stopScan()
         isScanning = false
+        bluetoothStatus = displays.isEmpty
+            ? "No nearby Bluetooth devices found. Make sure the display is on, then scan again."
+            : "Found \(displays.count) nearby Bluetooth device(s). Select your display."
     }
 
     func sendImage(_ imageData: Data) async throws {
@@ -66,6 +85,9 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
         }
         let frame = try ImageFrameEncoder.rgbFrame(from: imageData)
         try await waitUntilReady()
+        guard let central else {
+            throw MatrixError.bluetoothUnavailable
+        }
 
         guard let peripheral = foundPeripherals[uuid]
                 ?? central.retrievePeripherals(withIdentifiers: [uuid]).first else {
@@ -92,16 +114,43 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
     }
 
     private func waitUntilReady() async throws {
-        switch central.state {
-        case .poweredOn:
-            return
-        case .poweredOff, .unauthorized, .unsupported:
+        if central == nil {
+            central = CBCentralManager(delegate: self, queue: .main)
+        }
+        guard let central else {
             throw MatrixError.bluetoothUnavailable
-        default:
-            try await withCheckedThrowingContinuation { continuation in
-                readinessWaiter = continuation
+        }
+
+        for _ in 0..<100 {
+            try Task.checkCancellation()
+            switch CBManager.authorization {
+            case .denied:
+                throw MatrixError.permissionDenied
+            case .restricted:
+                throw MatrixError.permissionRestricted
+            case .notDetermined, .allowedAlways:
+                break
+            @unknown default:
+                break
+            }
+
+            switch central.state {
+            case .poweredOn:
+                bluetoothStatus = "Bluetooth ready. Searching for displays…"
+                return
+            case .poweredOff:
+                throw MatrixError.bluetoothPoweredOff
+            case .unauthorized:
+                throw MatrixError.permissionDenied
+            case .unsupported:
+                throw MatrixError.bluetoothUnsupported
+            case .unknown, .resetting:
+                try await Task.sleep(for: .milliseconds(100))
+            @unknown default:
+                try await Task.sleep(for: .milliseconds(100))
             }
         }
+        throw MatrixError.bluetoothTimedOut
     }
 
     private func connect(to peripheral: CBPeripheral) async throws {
@@ -111,6 +160,9 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
 
         activePeripheral = peripheral
         peripheral.delegate = self
+        guard let central else {
+            throw MatrixError.bluetoothUnavailable
+        }
         try await withCheckedThrowingContinuation { continuation in
             connectionWaiter = continuation
             central.connect(peripheral)
@@ -119,7 +171,7 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
                 self.connectionWaiter?.resume(throwing: MatrixError.connectionTimedOut)
                 self.connectionWaiter = nil
                 if let peripheral {
-                    self.central.cancelPeripheralConnection(peripheral)
+                    self.central?.cancelPeripheralConnection(peripheral)
                 }
             }
         }
@@ -180,6 +232,11 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
         case noDisplaySelected
         case displayUnavailable
         case bluetoothUnavailable
+        case permissionDenied
+        case permissionRestricted
+        case bluetoothPoweredOff
+        case bluetoothUnsupported
+        case bluetoothTimedOut
         case connectionTimedOut
         case connectionFailed
         case characteristicUnavailable
@@ -192,6 +249,16 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
                 return "The selected display was not found. Open OpenMatrix and scan for it again."
             case .bluetoothUnavailable:
                 return "Bluetooth is unavailable. Turn on Bluetooth and try again."
+            case .permissionDenied:
+                return "Bluetooth access is turned off for OpenMatrix. Allow it in Settings > Privacy & Security > Bluetooth, then try again."
+            case .permissionRestricted:
+                return "Bluetooth access is restricted on this device."
+            case .bluetoothPoweredOff:
+                return "Turn on Bluetooth in Settings or Control Center, then scan again."
+            case .bluetoothUnsupported:
+                return "This device does not support Bluetooth Low Energy."
+            case .bluetoothTimedOut:
+                return "Bluetooth did not finish starting. Check Bluetooth access in Settings and try again."
             case .connectionTimedOut:
                 return "The display did not connect in time. Move closer and try again."
             case .connectionFailed:
@@ -205,6 +272,23 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
 
 extension IDotMatrixBluetooth: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        switch central.state {
+        case .poweredOn:
+            bluetoothStatus = "Bluetooth ready."
+        case .poweredOff:
+            bluetoothStatus = "Bluetooth is off. Turn it on and tap Scan."
+        case .unauthorized:
+            bluetoothStatus = MatrixError.permissionDenied.localizedDescription
+        case .unsupported:
+            bluetoothStatus = MatrixError.bluetoothUnsupported.localizedDescription
+        case .resetting:
+            bluetoothStatus = "Bluetooth is restarting…"
+        case .unknown:
+            bluetoothStatus = "Waiting for Bluetooth…"
+        @unknown default:
+            bluetoothStatus = "Bluetooth state unavailable."
+        }
+
         if central.state != .poweredOn {
             if connectionWaiter != nil {
                 finishConnection(with: MatrixError.bluetoothUnavailable)
@@ -213,17 +297,6 @@ extension IDotMatrixBluetooth: CBCentralManagerDelegate {
                 writeReadyWaiter = nil
                 waiter.resume(throwing: MatrixError.bluetoothUnavailable)
             }
-        }
-        guard let waiter = readinessWaiter else { return }
-        switch central.state {
-        case .poweredOn:
-            readinessWaiter = nil
-            waiter.resume()
-        case .poweredOff, .unauthorized, .unsupported:
-            readinessWaiter = nil
-            waiter.resume(throwing: MatrixError.bluetoothUnavailable)
-        default:
-            break
         }
     }
 
@@ -257,6 +330,7 @@ extension IDotMatrixBluetooth: CBCentralManagerDelegate {
             displays.append(display)
         }
         displays.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        bluetoothStatus = "Found \(displays.count) nearby device(s)…"
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {

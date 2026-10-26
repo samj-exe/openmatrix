@@ -21,6 +21,11 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .accessibilityIdentifier("statusMessage")
+                Text(bluetooth.bluetoothStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier("bluetoothStatus")
                 Spacer(minLength: 0)
             }
             .padding()
@@ -29,6 +34,12 @@ struct ContentView: View {
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
             )) {
+                if errorMessage?.contains("Settings > Privacy") == true {
+                    Button("Open Settings") {
+                        guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+                        UIApplication.shared.open(settingsURL)
+                    }
+                }
                 Button("OK", role: .cancel) { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
@@ -60,9 +71,7 @@ struct ContentView: View {
                     Task {
                         do {
                             try await bluetooth.scan()
-                            statusMessage = bluetooth.displays.isEmpty
-                                ? "No iDotMatrix display found. Make sure it is on and nearby."
-                                : "Select your display."
+                            statusMessage = bluetooth.displays.isEmpty ? "No devices found." : "Select your display."
                         } catch {
                             errorMessage = error.localizedDescription
                         }
