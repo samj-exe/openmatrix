@@ -18,8 +18,11 @@ struct SendImageToDisplayIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        try await IDotMatrixBluetooth.shared.sendImage(image.data)
-        return .result(dialog: "Image sent to your iDotMatrix display.")
+        let acknowledged = try await IDotMatrixBluetooth.shared.sendImage(image.data)
+        if acknowledged {
+            return .result(dialog: "Bluetooth acknowledged the transfer. The display does not confirm image rendering.")
+        }
+        return .result(dialog: "Image transfer sent. A Bluetooth write acknowledgement was not available.")
     }
 }
 

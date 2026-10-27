@@ -30,6 +30,8 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
     private var readinessWaiterID: UUID?
     private var connectionWaiter: CheckedContinuation<Void, Error>?
     private var writeReadyWaiter: CheckedContinuation<Void, Error>?
+    private var writeResponseWaiter: CheckedContinuation<Void, Error>?
+    private var writeResponseWaiterID: UUID?
 
     private override init() {
         super.init()
@@ -80,7 +82,7 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
             : "Found \(displays.count) nearby Bluetooth device(s). Select your display."
     }
 
-    func sendImage(_ imageData: Data) async throws {
+    func sendImage(_ imageData: Data) async throws -> Bool {
         guard let identifier = defaults.string(forKey: "selectedDisplayID"),
               let uuid = UUID(uuidString: identifier) else {
             throw MatrixError.noDisplaySelected
@@ -109,10 +111,19 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
             throw MatrixError.characteristicUnavailable
         }
 
-        try await write(Data([0x05, 0x00, 0x04, 0x01, 0x01]), to: peripheral, characteristic: characteristic)
-        try await Task.sleep(for: .milliseconds(100))
-        try await write(Self.packetize(frame), to: peripheral, characteristic: characteristic)
-        try await Task.sleep(for: .milliseconds(100))
+        try await write(
+            Data([0x05, 0x00, 0x04, 0x01, 0x01]),
+            to: peripheral,
+            characteristic: characteristic,
+            confirmLastWrite: true
+        )
+        try await write(
+            Self.packetize(frame),
+            to: peripheral,
+            characteristic: characteristic,
+            confirmLastWrite: true
+        )
+        return characteristic.properties.contains(.write)
     }
 
     private func waitUntilReady() async throws {
@@ -198,12 +209,24 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
         }
     }
 
-    private func write(_ data: Data, to peripheral: CBPeripheral, characteristic: CBCharacteristic) async throws {
-        let maximumWriteLength = max(20, peripheral.maximumWriteValueLength(for: .withoutResponse))
+    private func write(
+        _ data: Data,
+        to peripheral: CBPeripheral,
+        characteristic: CBCharacteristic,
+        confirmLastWrite: Bool = false
+    ) async throws {
+        let supportsWriteResponse = characteristic.properties.contains(.write)
+        let maximumNoResponseLength = max(20, peripheral.maximumWriteValueLength(for: .withoutResponse))
+        let maximumResponseLength = max(20, peripheral.maximumWriteValueLength(for: .withResponse))
         var offset = 0
 
         while offset < data.count {
-            if !peripheral.canSendWriteWithoutResponse {
+            let remainingCount = data.count - offset
+            let useResponse = confirmLastWrite
+                && supportsWriteResponse
+                && remainingCount <= maximumResponseLength
+            let maximumWriteLength = useResponse ? maximumResponseLength : maximumNoResponseLength
+            if !useResponse && !peripheral.canSendWriteWithoutResponse {
                 try await withCheckedThrowingContinuation { continuation in
                     writeReadyWaiter = continuation
                     if peripheral.canSendWriteWithoutResponse {
@@ -213,8 +236,52 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
                 }
             }
             let end = min(offset + maximumWriteLength, data.count)
-            peripheral.writeValue(data.subdata(in: offset..<end), for: characteristic, type: .withoutResponse)
+            if useResponse {
+                try await writeWithResponse(
+                    data.subdata(in: offset..<end),
+                    to: peripheral,
+                    characteristic: characteristic
+                )
+            } else {
+                peripheral.writeValue(
+                    data.subdata(in: offset..<end),
+                    for: characteristic,
+                    type: .withoutResponse
+                )
+            }
             offset = end
+        }
+    }
+
+    private func writeWithResponse(
+        _ data: Data,
+        to peripheral: CBPeripheral,
+        characteristic: CBCharacteristic
+    ) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            let waiterID = UUID()
+            writeResponseWaiterID = waiterID
+            writeResponseWaiter = continuation
+            peripheral.writeValue(data, for: characteristic, type: .withResponse)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+                guard let self,
+                      self.writeResponseWaiterID == waiterID,
+                      let waiter = self.writeResponseWaiter else { return }
+                self.writeResponseWaiter = nil
+                self.writeResponseWaiterID = nil
+                waiter.resume(throwing: MatrixError.writeTimedOut)
+            }
+        }
+    }
+
+    private func finishWriteResponse(with error: Error?) {
+        guard let waiter = writeResponseWaiter else { return }
+        writeResponseWaiter = nil
+        writeResponseWaiterID = nil
+        if let error {
+            waiter.resume(throwing: error)
+        } else {
+            waiter.resume()
         }
     }
 
@@ -261,6 +328,7 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
         case connectionTimedOut
         case connectionFailed
         case characteristicUnavailable
+        case writeTimedOut
 
         var errorDescription: String? {
             switch self {
@@ -286,6 +354,8 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
                 return "OpenMatrix could not connect to the display."
             case .characteristicUnavailable:
                 return "The display does not expose the expected iDotMatrix BLE service."
+            case .writeTimedOut:
+                return "The display did not acknowledge the Bluetooth transfer. Move closer and try again."
             }
         }
     }
@@ -341,6 +411,7 @@ extension IDotMatrixBluetooth: CBCentralManagerDelegate {
                 writeReadyWaiter = nil
                 waiter.resume(throwing: MatrixError.bluetoothUnavailable)
             }
+            finishWriteResponse(with: MatrixError.bluetoothUnavailable)
         }
     }
 
@@ -396,6 +467,7 @@ extension IDotMatrixBluetooth: CBCentralManagerDelegate {
     ) {
         guard activePeripheral?.identifier == peripheral.identifier else { return }
         writeCharacteristic = nil
+        finishWriteResponse(with: error ?? MatrixError.connectionFailed)
         if connectionWaiter != nil {
             finishConnection(with: error ?? MatrixError.connectionFailed)
         }
@@ -407,6 +479,15 @@ extension IDotMatrixBluetooth: CBCentralManagerDelegate {
 }
 
 extension IDotMatrixBluetooth: CBPeripheralDelegate {
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didWriteValueFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        guard characteristic.uuid == Self.writeCharacteristicUUID else { return }
+        finishWriteResponse(with: error)
+    }
+
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard error == nil,
               let service = peripheral.services?.first(where: { $0.uuid == Self.serviceUUID }) else {

@@ -4,19 +4,20 @@ import UIKit
 
 struct ContentView: View {
     @StateObject private var bluetooth = IDotMatrixBluetooth.shared
+    @Environment(\.colorScheme) private var colorScheme
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var imageData: Data?
     @State private var previewImage: UIImage?
+    @State private var showsOtherDevices = false
     @State private var statusMessage = "Choose a display and image to get started."
     @State private var errorMessage: String?
 
     var body: some View {
         ZStack {
             LinearGradient(
-                colors: [
-                    Color(red: 0.96, green: 0.97, blue: 0.99),
-                    Color(red: 0.91, green: 0.95, blue: 1.0)
-                ],
+                colors: colorScheme == .dark
+                    ? [Color(red: 0.10, green: 0.12, blue: 0.16), Color(red: 0.06, green: 0.08, blue: 0.12)]
+                    : [Color(red: 0.96, green: 0.97, blue: 0.99), Color(red: 0.91, green: 0.95, blue: 1.0)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -79,7 +80,6 @@ struct ContentView: View {
                     }
                 }
             }
-            .preferredColorScheme(.light)
         }
     }
 
@@ -132,33 +132,67 @@ struct ContentView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(bluetooth.displays) { display in
+                ForEach(likelyDisplays) { display in
+                    displayRow(display)
+                }
+
+                if !otherDisplays.isEmpty {
                     Button {
-                        bluetooth.select(display)
-                        statusMessage = "Connected target: \(display.name)."
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(display.name)
-                                Text("\(display.isLikelyIDotMatrix ? "iDotMatrix candidate" : "Nearby BLE device") · \(display.rssi) dBm")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if bluetooth.selectedDisplayName == display.name {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.tint)
-                            }
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showsOtherDevices.toggle()
                         }
+                    } label: {
+                        Label(
+                            showsOtherDevices ? "Show fewer devices" : "Show more devices (\(otherDisplays.count))",
+                            systemImage: showsOtherDevices ? "chevron.up" : "chevron.down"
+                        )
+                        .font(.subheadline.weight(.medium))
                     }
                     .buttonStyle(.plain)
-                    .padding(.vertical, 4)
+                    .padding(.top, 4)
+
+                    if showsOtherDevices {
+                        ForEach(otherDisplays) { display in
+                            displayRow(display)
+                        }
+                    }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var likelyDisplays: [MatrixDisplay] {
+        bluetooth.displays.filter(\.isLikelyIDotMatrix)
+    }
+
+    private var otherDisplays: [MatrixDisplay] {
+        bluetooth.displays.filter { !$0.isLikelyIDotMatrix }
+    }
+
+    private func displayRow(_ display: MatrixDisplay) -> some View {
+        Button {
+            bluetooth.select(display)
+            statusMessage = "Selected target: \(display.name)."
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(display.name)
+                    Text("\(display.isLikelyIDotMatrix ? "iDotMatrix candidate" : "Nearby BLE device") · \(display.rssi) dBm")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if bluetooth.selectedDisplayName == display.name {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.tint)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 4)
     }
 
     private var imagePicker: some View {
@@ -203,8 +237,11 @@ struct ContentView: View {
             Task {
                 do {
                     statusMessage = "Sending image…"
-                    try await bluetooth.sendImage(imageData)
-                    statusMessage = "Image sent to \(bluetooth.selectedDisplayName ?? "your display")."
+                    let acknowledged = try await bluetooth.sendImage(imageData)
+                    let displayName = bluetooth.selectedDisplayName ?? "your display"
+                    statusMessage = acknowledged
+                        ? "Bluetooth acknowledged the transfer to \(displayName); image rendering is not confirmed."
+                        : "Transfer sent to \(displayName) without a Bluetooth write acknowledgement."
                 } catch {
                     errorMessage = error.localizedDescription
                     statusMessage = "Image could not be sent."

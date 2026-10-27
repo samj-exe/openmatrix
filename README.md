@@ -15,6 +15,11 @@ display over Bluetooth LE. It currently encodes images as 32 × 32 RGB frames.
    action uses the display selected in OpenMatrix; it can run without opening
    the app after that initial setup.
 
+OpenMatrix waits for a Bluetooth write acknowledgement when the display
+supports acknowledged writes. The display does not report whether an image was
+successfully rendered, so an acknowledged transfer is not proof that the screen
+updated.
+
 The app's background Bluetooth capability allows Shortcuts to attempt the send
 without presenting the app. iOS may still limit background execution or Bluetooth
 connectivity depending on device state and system policy.
