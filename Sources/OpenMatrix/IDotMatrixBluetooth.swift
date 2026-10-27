@@ -371,6 +371,7 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
     }
 }
 
+@MainActor
 extension IDotMatrixBluetooth: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         guard self.central === central else { return }
@@ -488,6 +489,7 @@ extension IDotMatrixBluetooth: CBCentralManagerDelegate {
     }
 }
 
+@MainActor
 extension IDotMatrixBluetooth: CBPeripheralDelegate {
     func peripheral(
         _ peripheral: CBPeripheral,

@@ -44,19 +44,17 @@ struct SyncNowPlayingCoverArtIntent: AppIntent {
 @available(iOS 18.0, *)
 struct OpenMatrixShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
-        [
-            AppShortcut(
-                intent: SendImageToDisplayIntent(),
-                phrases: ["Send an image to \(.applicationName)"],
-                shortTitle: "Send to Display",
-                systemImageName: "dot.radiowaves.left.and.right"
-            ),
-            AppShortcut(
-                intent: SyncNowPlayingCoverArtIntent(),
-                phrases: ["Sync now playing cover art with \(.applicationName)"],
-                shortTitle: "Sync Now Playing",
-                systemImageName: "music.note"
-            )
-        ]
+        AppShortcut(
+            intent: SendImageToDisplayIntent(),
+            phrases: ["Send an image to \(.applicationName)"],
+            shortTitle: "Send to Display",
+            systemImageName: "dot.radiowaves.left.and.right"
+        )
+        AppShortcut(
+            intent: SyncNowPlayingCoverArtIntent(),
+            phrases: ["Sync now playing cover art with \(.applicationName)"],
+            shortTitle: "Sync Now Playing",
+            systemImageName: "music.note"
+        )
     }
 }
