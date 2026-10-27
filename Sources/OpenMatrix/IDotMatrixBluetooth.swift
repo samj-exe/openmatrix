@@ -26,6 +26,8 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
     private var foundPeripherals: [UUID: CBPeripheral] = [:]
     private var activePeripheral: CBPeripheral?
     private var writeCharacteristic: CBCharacteristic?
+    private var readinessWaiter: CheckedContinuation<Void, Error>?
+    private var readinessWaiterID: UUID?
     private var connectionWaiter: CheckedContinuation<Void, Error>?
     private var writeReadyWaiter: CheckedContinuation<Void, Error>?
 
@@ -114,43 +116,59 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
     }
 
     private func waitUntilReady() async throws {
-        if central == nil {
-            central = CBCentralManager(delegate: self, queue: .main)
+        switch CBManager.authorization {
+        case .denied:
+            throw MatrixError.permissionDenied
+        case .restricted:
+            throw MatrixError.permissionRestricted
+        case .notDetermined, .allowedAlways:
+            break
+        @unknown default:
+            break
         }
-        guard let central else {
+
+        if let central, central.state != .unknown, central.state != .resetting {
+            try checkBluetoothState(central.state)
+            return
+        }
+
+        try await withCheckedThrowingContinuation { continuation in
+            let waiterID = UUID()
+            readinessWaiterID = waiterID
+            readinessWaiter = continuation
+            if central == nil {
+                central = CBCentralManager(delegate: self, queue: .main)
+            } else {
+                bluetoothStatus = "Waiting for iOS Bluetooth authorization…"
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
+                guard let self,
+                      self.readinessWaiterID == waiterID,
+                      let waiter = self.readinessWaiter else { return }
+                self.readinessWaiter = nil
+                self.readinessWaiterID = nil
+                self.bluetoothStatus = MatrixError.bluetoothTimedOut.localizedDescription
+                waiter.resume(throwing: MatrixError.bluetoothTimedOut)
+            }
+        }
+    }
+
+    private func checkBluetoothState(_ state: CBManagerState) throws {
+        switch state {
+        case .poweredOn:
+            bluetoothStatus = "Bluetooth ready. Searching for displays…"
+        case .poweredOff:
+            throw MatrixError.bluetoothPoweredOff
+        case .unauthorized:
+            throw MatrixError.permissionDenied
+        case .unsupported:
+            throw MatrixError.bluetoothUnsupported
+        case .unknown, .resetting:
+            throw MatrixError.bluetoothTimedOut
+        @unknown default:
             throw MatrixError.bluetoothUnavailable
         }
-
-        for _ in 0..<100 {
-            try Task.checkCancellation()
-            switch CBManager.authorization {
-            case .denied:
-                throw MatrixError.permissionDenied
-            case .restricted:
-                throw MatrixError.permissionRestricted
-            case .notDetermined, .allowedAlways:
-                break
-            @unknown default:
-                break
-            }
-
-            switch central.state {
-            case .poweredOn:
-                bluetoothStatus = "Bluetooth ready. Searching for displays…"
-                return
-            case .poweredOff:
-                throw MatrixError.bluetoothPoweredOff
-            case .unauthorized:
-                throw MatrixError.permissionDenied
-            case .unsupported:
-                throw MatrixError.bluetoothUnsupported
-            case .unknown, .resetting:
-                try await Task.sleep(for: .milliseconds(100))
-            @unknown default:
-                try await Task.sleep(for: .milliseconds(100))
-            }
-        }
-        throw MatrixError.bluetoothTimedOut
     }
 
     private func connect(to peripheral: CBPeripheral) async throws {
@@ -287,6 +305,27 @@ extension IDotMatrixBluetooth: CBCentralManagerDelegate {
             bluetoothStatus = "Waiting for Bluetooth…"
         @unknown default:
             bluetoothStatus = "Bluetooth state unavailable."
+        }
+
+        if let waiter = readinessWaiter {
+            switch central.state {
+            case .poweredOn, .poweredOff, .unauthorized, .unsupported:
+                readinessWaiter = nil
+                readinessWaiterID = nil
+                do {
+                    try checkBluetoothState(central.state)
+                    waiter.resume()
+                } catch {
+                    bluetoothStatus = error.localizedDescription
+                    waiter.resume(throwing: error)
+                }
+            case .unknown, .resetting:
+                break
+            @unknown default:
+                readinessWaiter = nil
+                readinessWaiterID = nil
+                waiter.resume(throwing: MatrixError.bluetoothUnavailable)
+            }
         }
 
         if central.state != .poweredOn {

@@ -12,23 +12,26 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                displayPicker
-                imagePicker
-                sendButton
-                Text(statusMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .accessibilityIdentifier("statusMessage")
-                Text(bluetooth.bluetoothStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .accessibilityIdentifier("bluetoothStatus")
-                Spacer(minLength: 0)
+            ScrollView {
+                VStack(spacing: 20) {
+                    displayPicker
+                    imagePicker
+                    sendButton
+                    Text(statusMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("statusMessage")
+                    Text(bluetooth.bluetoothStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("bluetoothStatus")
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
             }
-            .padding()
+            .scrollBounceBehavior(.basedOnSize)
             .navigationTitle("OpenMatrix")
             .alert("OpenMatrix", isPresented: Binding(
                 get: { errorMessage != nil },
@@ -131,7 +134,8 @@ struct ContentView: View {
                     .accessibilityLabel("Selected image preview")
             } else {
                 ContentUnavailableView("No Image", systemImage: "photo", description: Text("Choose an image to send"))
-                    .frame(height: 180)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 140)
             }
 
             PhotosPicker(selection: $selectedPhoto, matching: .images) {
