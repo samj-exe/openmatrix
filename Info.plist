@@ -22,6 +22,8 @@
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>OpenMatrix uses Bluetooth to send images to your iDotMatrix display.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>OpenMatrix uses Bluetooth to send images to your iDotMatrix display.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Choose an image to send to your iDotMatrix display.</string>
 	<key>UIBackgroundModes</key>

@@ -148,6 +148,9 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
                       let waiter = self.readinessWaiter else { return }
                 self.readinessWaiter = nil
                 self.readinessWaiterID = nil
+                if self.central?.state == .unknown || self.central?.state == .resetting {
+                    self.central = nil
+                }
                 self.bluetoothStatus = MatrixError.bluetoothTimedOut.localizedDescription
                 waiter.resume(throwing: MatrixError.bluetoothTimedOut)
             }
@@ -276,7 +279,7 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
             case .bluetoothUnsupported:
                 return "This device does not support Bluetooth Low Energy."
             case .bluetoothTimedOut:
-                return "Bluetooth did not finish starting. Check Bluetooth access in Settings and try again."
+                return "Bluetooth did not finish starting. Check Settings > Privacy & Security > Bluetooth for OpenMatrix. If it is not listed, reinstall the latest build and tap Scan again."
             case .connectionTimedOut:
                 return "The display did not connect in time. Move closer and try again."
             case .connectionFailed:
@@ -290,6 +293,8 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
 
 extension IDotMatrixBluetooth: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        guard self.central === central else { return }
+
         switch central.state {
         case .poweredOn:
             bluetoothStatus = "Bluetooth ready."

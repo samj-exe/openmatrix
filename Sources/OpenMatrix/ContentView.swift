@@ -11,57 +11,95 @@ struct ContentView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    displayPicker
-                    imagePicker
-                    sendButton
-                    Text(statusMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .accessibilityIdentifier("statusMessage")
-                    Text(bluetooth.bluetoothStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .accessibilityIdentifier("bluetoothStatus")
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.96, green: 0.97, blue: 0.99),
+                    Color(red: 0.91, green: 0.95, blue: 1.0)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        header
+                        displayPicker
+                        imagePicker
+                        sendButton
+                        Text(statusMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .accessibilityIdentifier("statusMessage")
+                        Text(bluetooth.bluetoothStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .accessibilityIdentifier("bluetoothStatus")
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+                    .padding(.bottom, 24)
+                    .frame(maxWidth: 560)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding()
-                .frame(maxWidth: .infinity)
-            }
-            .scrollBounceBehavior(.basedOnSize)
-            .navigationTitle("OpenMatrix")
-            .alert("OpenMatrix", isPresented: Binding(
-                get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
-            )) {
-                if errorMessage?.contains("Settings > Privacy") == true {
-                    Button("Open Settings") {
-                        guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
-                        UIApplication.shared.open(settingsURL)
+                .scrollBounceBehavior(.basedOnSize)
+                .toolbar(.hidden, for: .navigationBar)
+                .alert("OpenMatrix", isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { if !$0 { errorMessage = nil } }
+                )) {
+                    if errorMessage?.contains("Settings") == true {
+                        Button("Open Settings") {
+                            guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+                            UIApplication.shared.open(settingsURL)
+                        }
+                    }
+                    Button("OK", role: .cancel) { errorMessage = nil }
+                } message: {
+                    Text(errorMessage ?? "")
+                }
+                .task(id: selectedPhoto) {
+                    guard let selectedPhoto else { return }
+                    do {
+                        guard let data = try await selectedPhoto.loadTransferable(type: Data.self),
+                              let image = UIImage(data: data) else {
+                            throw ImageSelectionError.unreadable
+                        }
+                        imageData = data
+                        previewImage = image
+                        statusMessage = "Image ready for a 32 × 32 display."
+                    } catch {
+                        errorMessage = error.localizedDescription
                     }
                 }
-                Button("OK", role: .cancel) { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
             }
-            .task(id: selectedPhoto) {
-                guard let selectedPhoto else { return }
-                do {
-                    guard let data = try await selectedPhoto.loadTransferable(type: Data.self),
-                          let image = UIImage(data: data) else {
-                        throw ImageSelectionError.unreadable
-                    }
-                    imageData = data
-                    previewImage = image
-                    statusMessage = "Image ready for a 32 × 32 display."
-                } catch {
-                    errorMessage = error.localizedDescription
-                }
-            }
+            .preferredColorScheme(.light)
         }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 48, height: 48)
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("OpenMatrix")
+                    .font(.title2.weight(.bold))
+                Text("Send an image to your pixel display")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
     }
 
     private var displayPicker: some View {
@@ -133,9 +171,22 @@ struct ContentView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .accessibilityLabel("Selected image preview")
             } else {
-                ContentUnavailableView("No Image", systemImage: "photo", description: Text("Choose an image to send"))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 140)
+                HStack(spacing: 12) {
+                    Image(systemName: "photo")
+                        .font(.title2)
+                        .foregroundStyle(Color.accentColor)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("No image selected")
+                            .font(.headline)
+                        Text("Choose a photo to preview it here.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, minHeight: 72)
+                .padding(.horizontal, 16)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
             }
 
             PhotosPicker(selection: $selectedPhoto, matching: .images) {
