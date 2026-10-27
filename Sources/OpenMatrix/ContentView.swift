@@ -16,6 +16,9 @@ struct ContentView: View {
     @State private var imageData: Data?
     @State private var previewImage: UIImage?
     @State private var showsOtherDevices = false
+    @State private var activeRetry: RetryAction?
+    @State private var retryID: UUID?
+    @State private var retryTask: Task<Void, Never>?
     @State private var statusMessage = "Choose a display and image to get started."
     @State private var errorMessage: String?
 
@@ -364,22 +367,17 @@ struct ContentView: View {
 
     private var sendButton: some View {
         Button {
-            guard let imageData else { return }
-            Task {
-                do {
-                    statusMessage = "Sending image…"
-                    let acknowledged = try await bluetooth.sendImage(imageData)
-                    let displayName = bluetooth.selectedDisplayName ?? "your display"
-                    statusMessage = acknowledged
-                        ? "Bluetooth acknowledged the transfer to \(displayName); image rendering is not confirmed."
-                        : "Transfer sent to \(displayName) without a Bluetooth write acknowledgement."
-                } catch {
-                    errorMessage = error.localizedDescription
-                    statusMessage = "Image could not be sent."
-                }
+            if activeRetry == .image {
+                cancelRetry()
+                return
             }
+            guard let imageData else { return }
+            startImageRetry(imageData)
         } label: {
-            if bluetooth.isSending {
+            if activeRetry == .image {
+                Label("Retrying... (Tap to cancel)", systemImage: "xmark.circle")
+                    .frame(maxWidth: .infinity)
+            } else if bluetooth.isSending {
                 ProgressView()
                     .frame(maxWidth: .infinity)
             } else {
@@ -388,20 +386,24 @@ struct ContentView: View {
             }
         }
         .buttonStyle(.borderedProminent)
-        .disabled(imageData == nil || bluetooth.isSending)
+        .disabled(
+            activeRetry == .lastFM
+                || (activeRetry != .image && (imageData == nil || bluetooth.isSending || bluetooth.isScanning))
+        )
     }
 
     private var syncLastFMButton: some View {
         Button {
-            Task {
-                do {
-                    _ = try await lastFM.syncCurrentTrack()
-                } catch {
-                    errorMessage = error.localizedDescription
-                }
+            if activeRetry == .lastFM {
+                cancelRetry()
+            } else {
+                startLastFMRetries()
             }
         } label: {
-            if lastFM.isSyncing {
+            if activeRetry == .lastFM {
+                Label("Retrying... (Tap to cancel)", systemImage: "xmark.circle")
+                    .frame(maxWidth: .infinity)
+            } else if lastFM.isSyncing {
                 ProgressView()
                     .frame(maxWidth: .infinity)
             } else {
@@ -410,7 +412,90 @@ struct ContentView: View {
             }
         }
         .buttonStyle(.bordered)
-        .disabled(!lastFM.isConfigured || lastFM.isSyncing || bluetooth.isSending || bluetooth.isScanning)
+        .disabled(
+            activeRetry == .image
+                || (activeRetry != .lastFM
+                    && (!lastFM.isConfigured || lastFM.isSyncing || bluetooth.isSending || bluetooth.isScanning))
+        )
+    }
+
+    private func startImageRetry(_ imageData: Data) {
+        startRetry(for: .image) {
+            let acknowledged = try await bluetooth.sendImage(imageData)
+            let displayName = bluetooth.selectedDisplayName ?? "your display"
+            statusMessage = acknowledged
+                ? "Bluetooth acknowledged the transfer to \(displayName); image rendering is not confirmed."
+                : "Transfer sent to \(displayName) without a Bluetooth write acknowledgement."
+        }
+    }
+
+    private func startLastFMRetries() {
+        startRetry(for: .lastFM) {
+            _ = try await lastFM.syncCurrentTrack()
+            statusMessage = lastFM.status
+        }
+    }
+
+    private func startRetry(for action: RetryAction, operation: @escaping @MainActor () async throws -> Void) {
+        guard activeRetry == nil else { return }
+        let currentID = UUID()
+        retryID = currentID
+        activeRetry = action
+        statusMessage = action == .image ? "Sending image…" : "Checking Last.fm now playing…"
+        retryTask = Task { @MainActor in
+            while !Task.isCancelled, retryID == currentID {
+                do {
+                    try await operation()
+                    guard retryID == currentID else { return }
+                    finishRetry(currentID)
+                    return
+                } catch is CancellationError {
+                    guard retryID == currentID else { return }
+                    statusMessage = "Retry cancelled."
+                    finishRetry(currentID)
+                    return
+                } catch {
+                    guard retryID == currentID else { return }
+                    guard IDotMatrixBluetooth.isRetryableConnectionError(error) else {
+                        statusMessage = error.localizedDescription
+                        finishRetry(currentID)
+                        return
+                    }
+                    statusMessage = "Could not connect to the display. Retrying in 2 seconds… Tap the button again to cancel."
+                    do {
+                        try await Task.sleep(for: .seconds(2))
+                    } catch {
+                        guard retryID == currentID else { return }
+                        statusMessage = "Retry cancelled."
+                        finishRetry(currentID)
+                        return
+                    }
+                }
+            }
+        }
+    }
+
+    private func cancelRetry() {
+        let id = retryID
+        retryID = nil
+        retryTask?.cancel()
+        retryTask = nil
+        activeRetry = nil
+        if id != nil {
+            statusMessage = "Retry cancelled."
+        }
+    }
+
+    private func finishRetry(_ id: UUID) {
+        guard retryID == id else { return }
+        retryID = nil
+        retryTask = nil
+        activeRetry = nil
+    }
+
+    private enum RetryAction: Equatable {
+        case image
+        case lastFM
     }
 
     private enum ImageSelectionError: LocalizedError {

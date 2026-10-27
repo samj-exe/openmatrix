@@ -93,6 +93,7 @@ final class LastFMService: ObservableObject {
                 throw LastFMError.artworkUnavailable
             }
 
+            try Task.checkCancellation()
             let acknowledged = try await IDotMatrixBluetooth.shared.sendImage(artworkData)
             defaults.set(trackKey, forKey: "lastFMSyncedTrack")
             status = acknowledged

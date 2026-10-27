@@ -91,9 +91,34 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
             throw MatrixError.noDisplaySelected
         }
         isSending = true
-        var peripheralToDisconnect: CBPeripheral?
         defer {
             isSending = false
+        }
+
+        return try await withTaskCancellationHandler {
+            try await performImageSend(imageData, displayID: uuid)
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelActiveSend()
+            }
+        }
+    }
+
+    static func isRetryableConnectionError(_ error: Error) -> Bool {
+        guard let error = error as? MatrixError else { return false }
+        switch error {
+        case .displayUnavailable, .bluetoothUnavailable, .bluetoothPoweredOff,
+             .bluetoothTimedOut, .connectionTimedOut, .connectionFailed,
+             .characteristicUnavailable, .writeTimedOut, .operationInProgress:
+            return true
+        case .noDisplaySelected, .permissionDenied, .permissionRestricted, .bluetoothUnsupported:
+            return false
+        }
+    }
+
+    private func performImageSend(_ imageData: Data, displayID: UUID) async throws -> Bool {
+        var peripheralToDisconnect: CBPeripheral?
+        defer {
             if let peripheralToDisconnect {
                 central?.cancelPeripheralConnection(peripheralToDisconnect)
             }
@@ -107,8 +132,8 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
             throw MatrixError.bluetoothUnavailable
         }
 
-        guard let peripheral = foundPeripherals[uuid]
-                ?? central.retrievePeripherals(withIdentifiers: [uuid]).first else {
+        guard let peripheral = foundPeripherals[displayID]
+                ?? central.retrievePeripherals(withIdentifiers: [displayID]).first else {
             throw MatrixError.displayUnavailable
         }
 
@@ -131,6 +156,25 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
             confirmLastWrite: true
         )
         return characteristic.properties.contains(.write)
+    }
+
+    func cancelActiveSend() {
+        guard isSending else { return }
+        let cancellation = CancellationError()
+        if let waiter = readinessWaiter {
+            readinessWaiter = nil
+            readinessWaiterID = nil
+            waiter.resume(throwing: cancellation)
+        }
+        finishConnection(with: cancellation)
+        finishWriteResponse(with: cancellation)
+        if let waiter = writeReadyWaiter {
+            writeReadyWaiter = nil
+            waiter.resume(throwing: cancellation)
+        }
+        if let activePeripheral {
+            central?.cancelPeripheralConnection(activePeripheral)
+        }
     }
 
     private func waitUntilReady() async throws {
@@ -228,6 +272,7 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
         var offset = 0
 
         while offset < data.count {
+            try Task.checkCancellation()
             let remainingCount = data.count - offset
             let useResponse = confirmLastWrite
                 && supportsWriteResponse

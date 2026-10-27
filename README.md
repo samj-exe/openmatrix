@@ -11,6 +11,8 @@ display over Bluetooth LE. It currently encodes images as 32 × 32 RGB frames.
    nearby BLE devices even when the display does not advertise an iDotMatrix
    name.
 3. Choose an image and tap **Send to Display**.
+   If the display cannot be reached, OpenMatrix retries the image transfer. Tap
+   **Retrying...** to cancel.
 4. To use Shortcuts, add **Send Image to Display** and provide an image. The
    action uses the display selected in OpenMatrix; it can run without opening
    the app after that initial setup.
@@ -19,7 +21,8 @@ display over Bluetooth LE. It currently encodes images as 32 × 32 RGB frames.
    slider range; all adjustments are saved and also apply to Shortcuts images.
 6. Enter a Last.fm API key and username, select **Sync Now Playing Cover Art**,
    or add that action in Shortcuts to send the current track's cover to the
-   display.
+   display. A failed display connection is retried; tap **Retrying...** to
+   cancel.
 
 OpenMatrix checks Last.fm for track changes every 30 seconds while it is open.
 It also requests an iOS background app refresh after the app is backgrounded.
@@ -40,6 +43,12 @@ If Bluetooth access was previously denied, enable it for OpenMatrix in
 **Settings > Privacy & Security > Bluetooth**, then return to the app and scan
 again. The app shows Bluetooth startup, permission, and scan status below the
 display list.
+
+## App icon
+
+The app icon uses the blue `dot.radiowaves.left.and.right` mark from the
+in-app header. The asset catalog provides a white-background light icon and a
+dark-gradient icon for iOS dark appearance and Home Screen icon customization.
 
 ## Unsigned IPA from GitHub Actions
 
