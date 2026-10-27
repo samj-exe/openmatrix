@@ -27,6 +27,9 @@ targets:
         NSPhotoLibraryUsageDescription: Choose an image to send to your iDotMatrix display.
         UIBackgroundModes:
           - bluetooth-central
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.openmatrix.app.lastfm-refresh
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft

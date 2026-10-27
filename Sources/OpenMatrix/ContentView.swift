@@ -4,7 +4,14 @@ import UIKit
 
 struct ContentView: View {
     @StateObject private var bluetooth = IDotMatrixBluetooth.shared
+    @StateObject private var lastFM = LastFMService.shared
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("saturationBoost") private var saturationBoost = 1.0
+    @AppStorage("imageContrast") private var imageContrast = 1.0
+    @AppStorage("imageSharpness") private var imageSharpness = 0.0
+    @AppStorage("imageOrientation") private var imageOrientation = 0
+    @AppStorage("imageMirrored") private var imageMirrored = false
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var imageData: Data?
     @State private var previewImage: UIImage?
@@ -28,8 +35,11 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         header
                         displayPicker
+                        imageAdjustments
+                        lastFMSettings
                         imagePicker
                         sendButton
+                        syncLastFMButton
                         Text(statusMessage)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -77,6 +87,24 @@ struct ContentView: View {
                         statusMessage = "Image ready for a 32 × 32 display."
                     } catch {
                         errorMessage = error.localizedDescription
+                    }
+                }
+                .task(id: scenePhase) {
+                    guard scenePhase == .active else { return }
+                    while !Task.isCancelled {
+                        if lastFM.isConfigured {
+                            await lastFM.syncIfTrackChanged()
+                        }
+                        do {
+                            try await Task.sleep(for: .seconds(30))
+                        } catch {
+                            return
+                        }
+                    }
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .background {
+                        LastFMBackgroundRefresh.schedule()
                     }
                 }
             }
@@ -158,6 +186,109 @@ struct ContentView: View {
                     }
                 }
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var imageAdjustments: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Image adjustments", systemImage: "slider.horizontal.3")
+                .font(.headline)
+
+            adjustmentControl(
+                title: "Saturation boost",
+                value: $saturationBoost,
+                range: 0...3,
+                step: 0.1
+            )
+            adjustmentControl(
+                title: "Contrast",
+                value: $imageContrast,
+                range: 0...3,
+                step: 0.1
+            )
+            adjustmentControl(
+                title: "Sharpness",
+                value: $imageSharpness,
+                range: 0...3,
+                step: 0.1
+            )
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Orientation")
+                    .font(.subheadline)
+                Picker("Orientation", selection: $imageOrientation) {
+                    ForEach([0, 90, 180, 270], id: \.self) { degrees in
+                        Text("\(degrees)°").tag(degrees)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(maxWidth: .infinity)
+            }
+
+            Toggle("Mirror horizontally", isOn: $imageMirrored)
+                .font(.subheadline)
+        }
+        .padding()
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func adjustmentControl(
+        title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Text(title)
+                    .font(.subheadline)
+                Spacer()
+                TextField(title, value: value, format: .number.precision(.fractionLength(0...2)))
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 76)
+                    .textFieldStyle(.roundedBorder)
+            }
+            Slider(
+                value: Binding(
+                    get: { min(max(value.wrappedValue, range.lowerBound), range.upperBound) },
+                    set: { value.wrappedValue = $0 }
+                ),
+                in: range,
+                step: step
+            )
+            if title == "Saturation boost" {
+                Text("1.0 leaves color unchanged. Values entered above the slider range are retained.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var lastFMSettings: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Last.fm", systemImage: "music.note")
+                .font(.headline)
+            SecureField("Last.fm API key", text: $lastFM.apiKey)
+                .textContentType(.password)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            TextField("Last.fm username", text: $lastFM.username)
+                .textContentType(.username)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            Text(lastFM.status)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("OpenMatrix checks for track changes while open and uses iOS background refresh when available; background updates are not guaranteed to be immediate.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
@@ -258,6 +389,28 @@ struct ContentView: View {
         }
         .buttonStyle(.borderedProminent)
         .disabled(imageData == nil || bluetooth.isSending)
+    }
+
+    private var syncLastFMButton: some View {
+        Button {
+            Task {
+                do {
+                    _ = try await lastFM.syncCurrentTrack()
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        } label: {
+            if lastFM.isSyncing {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+            } else {
+                Label("Sync Now Playing Cover Art", systemImage: "music.note")
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .buttonStyle(.bordered)
+        .disabled(!lastFM.isConfigured || lastFM.isSyncing || bluetooth.isSending || bluetooth.isScanning)
     }
 
     private enum ImageSelectionError: LocalizedError {

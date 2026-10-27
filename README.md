@@ -14,6 +14,18 @@ display over Bluetooth LE. It currently encodes images as 32 × 32 RGB frames.
 4. To use Shortcuts, add **Send Image to Display** and provide an image. The
    action uses the display selected in OpenMatrix; it can run without opening
    the app after that initial setup.
+5. Adjust saturation, contrast, sharpness, orientation, or horizontal mirroring
+   in **Image adjustments**. The numeric fields accept values outside the
+   slider range; all adjustments are saved and also apply to Shortcuts images.
+6. Enter a Last.fm API key and username, select **Sync Now Playing Cover Art**,
+   or add that action in Shortcuts to send the current track's cover to the
+   display.
+
+OpenMatrix checks Last.fm for track changes every 30 seconds while it is open.
+It also requests an iOS background app refresh after the app is backgrounded.
+iOS chooses when (or whether) to run that refresh, so background cover updates
+are best-effort, not immediate or continuous. Last.fm must report a track as
+currently playing and provide cover art for it.
 
 OpenMatrix waits for a Bluetooth write acknowledgement when the display
 supports acknowledged writes. The display does not report whether an image was

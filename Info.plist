@@ -29,6 +29,11 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.openmatrix.app.lastfm-refresh</string>
 	</array>
 	<key>UIDeviceFamily</key>
 	<array>

@@ -83,10 +83,24 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
     }
 
     func sendImage(_ imageData: Data) async throws -> Bool {
+        guard !isSending, !isScanning else {
+            throw MatrixError.operationInProgress
+        }
         guard let identifier = defaults.string(forKey: "selectedDisplayID"),
               let uuid = UUID(uuidString: identifier) else {
             throw MatrixError.noDisplaySelected
         }
+        isSending = true
+        var peripheralToDisconnect: CBPeripheral?
+        defer {
+            isSending = false
+            if let peripheralToDisconnect {
+                central?.cancelPeripheralConnection(peripheralToDisconnect)
+            }
+            activePeripheral = nil
+            writeCharacteristic = nil
+        }
+
         let frame = try ImageFrameEncoder.rgbFrame(from: imageData)
         try await waitUntilReady()
         guard let central else {
@@ -98,14 +112,7 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
             throw MatrixError.displayUnavailable
         }
 
-        isSending = true
-        defer {
-            isSending = false
-            central.cancelPeripheralConnection(peripheral)
-            activePeripheral = nil
-            writeCharacteristic = nil
-        }
-
+        peripheralToDisconnect = peripheral
         try await connect(to: peripheral)
         guard let characteristic = writeCharacteristic else {
             throw MatrixError.characteristicUnavailable
@@ -329,6 +336,7 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
         case connectionFailed
         case characteristicUnavailable
         case writeTimedOut
+        case operationInProgress
 
         var errorDescription: String? {
             switch self {
@@ -356,6 +364,8 @@ final class IDotMatrixBluetooth: NSObject, ObservableObject {
                 return "The display does not expose the expected iDotMatrix BLE service."
             case .writeTimedOut:
                 return "The display did not acknowledge the Bluetooth transfer. Move closer and try again."
+            case .operationInProgress:
+                return "Bluetooth is already scanning or sending. Wait for it to finish and try again."
             }
         }
     }

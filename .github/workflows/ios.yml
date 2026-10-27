@@ -41,6 +41,7 @@ jobs:
           app_plist="build/OpenMatrix.xcarchive/Products/Applications/OpenMatrix.app/Info.plist"
           /usr/libexec/PlistBuddy -c 'Print :NSBluetoothAlwaysUsageDescription' "$app_plist"
           /usr/libexec/PlistBuddy -c 'Print :NSBluetoothPeripheralUsageDescription' "$app_plist"
+          /usr/libexec/PlistBuddy -c 'Print :BGTaskSchedulerPermittedIdentifiers' "$app_plist"
 
       - name: Package unsigned IPA
         run: |

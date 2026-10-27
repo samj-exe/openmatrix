@@ -27,13 +27,36 @@ struct SendImageToDisplayIntent: AppIntent {
 }
 
 @available(iOS 18.0, *)
+struct SyncNowPlayingCoverArtIntent: AppIntent {
+    static let title: LocalizedStringResource = "Sync Now Playing Cover Art"
+    static let description = IntentDescription("Send the cover art for your Last.fm now-playing track to your selected display.")
+    static let openAppWhenRun = false
+
+    @available(iOS 26.0, *)
+    static var supportedModes: IntentModes { .background }
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        _ = try await LastFMService.shared.syncCurrentTrack()
+        return .result(dialog: "Last.fm was checked for a now-playing track. Check OpenMatrix for transfer status.")
+    }
+}
+
+@available(iOS 18.0, *)
 struct OpenMatrixShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
-        AppShortcut(
-            intent: SendImageToDisplayIntent(),
-            phrases: ["Send an image to \(.applicationName)"],
-            shortTitle: "Send to Display",
-            systemImageName: "dot.radiowaves.left.and.right"
-        )
+        [
+            AppShortcut(
+                intent: SendImageToDisplayIntent(),
+                phrases: ["Send an image to \(.applicationName)"],
+                shortTitle: "Send to Display",
+                systemImageName: "dot.radiowaves.left.and.right"
+            ),
+            AppShortcut(
+                intent: SyncNowPlayingCoverArtIntent(),
+                phrases: ["Sync now playing cover art with \(.applicationName)"],
+                shortTitle: "Sync Now Playing",
+                systemImageName: "music.note"
+            )
+        ]
     }
 }
